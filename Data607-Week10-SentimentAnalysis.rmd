@@ -1,0 +1,440 @@
+---
+title: "Data607-Week10-Sentiment Analysis"
+author: "Vinayak Kamath"
+date: "04/05/2020"
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+--------------------------------------------------------------------------------    
+
+
+
+### Sentiment Analysis {.tabset .tabset-fade } 
+
+We will use Sentiment analysis to have text analysis to systematically identify, extract, quantify, and study affective states and subjective information. We will do this on the corpus of Novels and using different sentiment lexicon as discussed further in below sections.
+
+
+***
+
+Loading the required libraries:
+```{r load-library, message=FALSE, warning=FALSE}
+#install.packages("tidytext")
+library(tidytext)
+#install.packages("textdata")
+library(textdata)
+#install.packages("janeaustenr")
+library(janeaustenr)
+library(dplyr)
+library(stringr)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+library(wordcloud)
+library(reshape2)
+
+#Below additionaly for our use case:
+#devtools::install_github("bradleyboehmke/harrypotter")
+library(harrypotter)
+#devtools::install_github("mjockers/syuzhet")
+library("syuzhet")
+```
+
+***
+
+#### Use Case: Corpus - Harry Potter / Sentiment lexicon - loughran
+
+
+#####  Corpus - Harry Potter  
+
+The use case leverages the data provided in the harrypotter package. The package has been provided by  [bradleyboehmke](https://uc-r.github.io/sentiment_analysis).  
+
+The seven novels we are working with, and are provided by the harrypotter package, include:  
+
++ `philosophers_stone`: Harry Potter and the Philosophers Stone (1997)  
++ `chamber_of_secrets`: Harry Potter and the Chamber of Secrets (1998)  
++ `prisoner_of_azkaban`: Harry Potter and the Prisoner of Azkaban (1999)  
++ `goblet_of_fire`: Harry Potter and the Goblet of Fire (2000)  
++ `order_of_the_phoenix`: Harry Potter and the Order of the Phoenix (2003)  
++ `half_blood_prince`: Harry Potter and the Half-Blood Prince (2005)  
++ `deathly_hallows`: Harry Potter and the Deathly Hallows (2007)  
+
+Each text is in a character vector with each element representing a single chapter. 
+
+```{r}
+#To perform sentiment analysis we need to have our data in a tidy format:
+
+#Vector of title names:
+titles <- c("Philosopher's Stone", "Chamber of Secrets", "Prisoner of Azkaban",
+            "Goblet of Fire", "Order of the Phoenix", "Half-Blood Prince",
+            "Deathly Hallows")
+
+#vector of books:
+books <- list(philosophers_stone, chamber_of_secrets, prisoner_of_azkaban,
+           goblet_of_fire, order_of_the_phoenix, half_blood_prince,
+           deathly_hallows)
+
+# Creating the tidy dataset series.full:  
+series.full <- tibble()
+for(i in seq_along(titles)) {
+        
+        clean <- tibble(chapter = seq_along(books[[i]]),
+                        text = books[[i]]) %>%
+             unnest_tokens(word, text) %>%
+             mutate(book = titles[i]) %>%
+             select(book, everything())
+
+        series.full <- rbind(series.full, clean)
+}
+
+# set factor to keep books in order of publication:
+series.full$book <- factor(series.full$book, levels = rev(titles))
+
+#final tidy dataset ready for Analysis:
+series.full
+
+```
+
+*** 
+
+##### Sentiment lexicon - loughran 
+```{r message=FALSE, warning=FALSE}
+# Getting the sentiment lexicom for loughran:
+loughran.sentiments <- get_sentiments("loughran")
+str(loughran.sentiments)
+```
+
+***
+
+##### Score Analysis from the loughran lexicon
+
+1. We will first Remove Stop Words from the book series dataset.This will help us to look and process a reduced and focused word sets for our analysis:  
+    ```{r message=FALSE, warning=FALSE}
+    #We will use the anti_join() function to remove all stop words from our series set:
+    series.main <- series.full %>%
+      anti_join(stop_words)
+    
+    series.main
+    ```  
+      
+    ***we can see the final dataset size has reduced with the removal from stop words; from 1,089,386 to 409,338 rows.***   
+
+***
+
+2. Checking for `negative` AND `positive` sentiments in the first book `philosophers_stone` : 
+    ```{r message=FALSE, warning=FALSE}
+    # Creating a dataset for `negative` sentiment tokens:
+    loughran.sentiments.negative <- loughran.sentiments %>% 
+      filter(sentiment == "negative")
+    
+    # Creating a dataset for `positive` sentiment tokens:
+    loughran.sentiments.positive <- loughran.sentiments %>% 
+      filter(sentiment == "positive")
+    
+    # For negative tokens, we can use the inner_join() function to get all of the negative words from the book "Philosopher's Stone"; we will then count each frequency of the word occurnaces and plot on a wordcloud:
+    series.main %>%
+     filter(book == "Philosopher's Stone" ) %>%
+      inner_join(loughran.sentiments.negative) %>%
+      count(word) %>%
+      with(wordcloud(word, n, max.words = 100 ))
+
+    # We will repeat the above steps for positive tokens and plot similarly on a wordcloud:
+    series.main %>%
+     filter(book == "Philosopher's Stone" ) %>%
+      inner_join(loughran.sentiments.positive) %>%
+      count(word) %>%
+      with(wordcloud(word, n, max.words = 100 ))    
+    ```
+
+    ***We can see there are more negative words then positive words in the first Book.***   
+    
+***
+
+3. Chapter wise Sentiments score:  
+    ```{r message=FALSE, warning=FALSE}
+    # We will just take the positive and negative sentiments across all books in the series chappter wise grouped:
+    series.main.sentiment <- series.main %>%
+      inner_join(loughran.sentiments) %>%
+      count(book, index = chapter %/% 1, sentiment) %>%
+      spread(sentiment, n, fill = 0) %>%
+      mutate(sentiment = positive - negative)
+    
+    series.main.sentiment
+    
+    # We can now plot it to visualize the spread of the sentiments:
+    ggplot(series.main.sentiment, aes(index, sentiment, fill = book)) +
+      geom_col(show.legend = FALSE) +
+      facet_wrap(~book, ncol = 2, scales = "free_x")
+    
+    ```  
+    
+    ***From the ggplot and the table data above, we can see that the book overall is more negative then postive score for each chapter; the books are not for smaller children perhaps.*** 
+
+***
+
+4. Top words across all sentiments in all books:  
+    ```{r message=FALSE, warning=FALSE}
+    # Below runs across all the books in the series for all sentiments types and plots the top 15 words per sentiment category for the entie series: 
+    series.main %>%
+      inner_join(loughran.sentiments) %>%
+      count(word, sentiment, sort = TRUE) %>%
+      ungroup()  %>%
+      group_by(sentiment) %>%
+      top_n(15) %>%
+      ungroup() %>%
+      mutate(word = reorder(word, n)) %>%
+      ggplot(aes(word, n, fill = sentiment)) +
+      geom_col(show.legend = FALSE) +
+      facet_wrap(~sentiment, scales = "free_y") +
+      labs(y = "Contribution to sentiment",
+           x = NULL) +
+      coord_flip()
+    
+    ```  
+    
+    ***We can conlude by saying that harry potter did have a adventurous but a thrilling life. Rightly fits into the genre of Fantasy, drama, young adult fiction, mystery, and thriller [[wikipedia link](https://en.wikipedia.org/wiki/Harry_Potter)]***
+
+
+***
+
+#### Appendix: The Sentiments Dataset
+
+Below are from the example code provided in book **Text Mining with R**, Chapter 2 looks at [Sentiment Analysis](https://www.tidytextmining.com/sentiment.html). 
+
+
+##### Sentiments Lexicon
+
+The tidytext package provides access to several sentiment lexicons. Three general-purpose lexicons are
+
++ `AFINN` from Finn Årup Nielsen,  
++ `bing` from Bing Liu and collaborators, and  
++ `nrc` from Saif Mohammad and Peter Turney.  
+
+All three of these lexicons are based on unigrams, i.e., single words. These lexicons contain many English words and the words are assigned scores for positive/negative sentiment, and also possibly emotions like joy, anger, sadness, and so forth.
+
+The function get_sentiments() allows us to get specific sentiment lexicons with the appropriate measures for each one.  
+
+```{r}
+afinn.sentiments <- get_sentiments("afinn")
+str(afinn.sentiments)
+
+bing.sentiments <- get_sentiments("bing")
+str(bing.sentiments)
+
+nrc.sentiments <- get_sentiments("nrc")
+str(nrc.sentiments)
+
+```
+
+***
+
+##### `Joy` score from the NRC lexicon
+
+Let’s look at the words with a joy score from the NRC lexicon and compare against the corpus austen_books.  
+
+```{r}
+# austen_books pull:
+tidy_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(linenumber = row_number(),
+         chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]", 
+                                                 ignore_case = TRUE)))) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+kable(head(tidy_books,10 ) )
+
+# nrc sentiments joy:
+nrc.sentiments.joy <- nrc.sentiments %>%
+  filter(sentiment == 'joy')
+
+tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc.sentiments.joy) %>%
+  count(word, sort = TRUE)
+
+# nrc sentiments sadness:
+nrc.sentiments.sadness <- nrc.sentiments %>%
+  filter(sentiment == 'sadness')
+
+tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc.sentiments.sadness) %>%
+  count(word, sort = TRUE)
+
+
+# jane_austen_sentiment:
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(bing.sentiments) %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x")
+
+``` 
+
+***
+
+##### The Three Sentiment Dictionaries
+
+Let’s use all three sentiment lexicons and examine how the sentiment changes across the narrative arc of Pride and Prejudice. First, let’s use filter() to choose only the words from the one novel we are interested in.  
+
+```{r}
+# pride_prejudice:
+pride_prejudice <- tidy_books %>% 
+  filter(book == "Pride & Prejudice")
+
+kable(head(pride_prejudice,10 ) )
+
+# Get the split counts:
+afinn <- pride_prejudice %>% 
+  inner_join(afinn.sentiments) %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+bing_and_nrc <- bind_rows(pride_prejudice %>% 
+                            inner_join(bing.sentiments) %>%
+                            mutate(method = "Bing et al."),
+                          pride_prejudice %>% 
+                            inner_join(nrc.sentiments %>% 
+                                         filter(sentiment %in% c("positive", 
+                                                                 "negative"))) %>%
+                            mutate(method = "NRC")) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+# Plot:
+bind_rows(afinn, 
+          bing_and_nrc) %>%
+  ggplot(aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y")
+
+# Positive and negative words are in these lexicons:
+nrc.sentiments %>% 
+     filter(sentiment %in% c("positive", 
+                             "negative")) %>% 
+  count(sentiment)
+
+bing.sentiments %>% 
+  count(sentiment)
+
+```
+
+***
+
+##### Common Positive and Negative Words
+
+we can analyze word counts that contribute to each sentiment. By implementing count() here with arguments of both word and sentiment, we find out how much each word contributed to each sentiment.
+
+```{r}
+# bing_word_counts:
+bing_word_counts <- tidy_books %>%
+  inner_join(bing.sentiments) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(y = "Contribution to sentiment",
+       x = NULL) +
+  coord_flip()
+
+# custom_stop_words:
+custom_stop_words <- bind_rows(tibble(word = c("miss"), 
+                                          lexicon = c("custom")), 
+                               stop_words)
+
+custom_stop_words
+
+```
+
+***
+
+##### Wordclouds
+
+Let’s look at the most common words in Jane Austen’s works as a whole again, but this time as a wordcloud. The size of a word’s text in below figure is in proportion to its frequency within its sentiment. We can use this visualization to see the most important positive and negative words, but the sizes of the words are not comparable across sentiments.  
+
+```{r}
+
+tidy_books %>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+tidy_books %>%
+  inner_join(bing.sentiments) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 100)
+```
+
+***
+
+##### N-Grams
+
+Looking at units beyond just words;  some sentiment analysis algorithms look beyond only unigrams (i.e. single words) to try to understand the sentiment of a sentence as a whole.  
+
+```{r}
+# token = "sentences"; we may want to tokenize text into sentences, and it makes sense to use a new name for the output column in such a case : 
+PandP_sentences <- tibble(text = prideprejudice) %>% 
+  unnest_tokens(sentence, text, token = "sentences")
+
+PandP_sentences$sentence[2]
+
+
+# chapters: unnest_tokens() is to split into tokens using a regex pattern. We could use this, for example, to split the text of Jane Austen’s novels into a data frame by chapter.  
+austen_chapters <- austen_books() %>%
+  group_by(book) %>%
+  unnest_tokens(chapter, text, token = "regex", 
+                pattern = "Chapter|CHAPTER [\\dIVXLC]") %>%
+  ungroup()
+
+austen_chapters %>% 
+  group_by(book) %>% 
+  summarise(chapters = n())
+
+
+#bing.sentiments.negative; let’s find the number of negative words in each chapter and divide by the total words in each chapter. For each book, which chapter has the highest proportion of negative words:  
+bing.sentiments.negative <- bing.sentiments %>% 
+  filter(sentiment == "negative")
+
+wordcounts <- tidy_books %>%
+  group_by(book, chapter) %>%
+  summarize(words = n())
+
+tidy_books %>%
+  semi_join(bing.sentiments.negative) %>%
+  group_by(book, chapter) %>%
+  summarize(negativewords = n()) %>%
+  left_join(wordcounts, by = c("book", "chapter")) %>%
+  mutate(ratio = negativewords/words) %>%
+  filter(chapter != 0) %>%
+  top_n(1) %>%
+  ungroup()
+```
+
+
+***
+
+### {-}
+
+\clearpage  
+  
